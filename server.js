@@ -241,11 +241,9 @@ app.post(
 
     try {
       const file = req.file;
-      const fileExt = file.originalname.split(".").pop();
       const safeName = file.originalname.replace(/\s+/g, "_");
       const filePath = `${bookingId}/${Date.now()}-${safeName}`;
 
-      // 1) Ladda upp till Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("booking-files")
         .upload(filePath, file.buffer, {
@@ -254,23 +252,16 @@ app.post(
         });
 
       if (uploadError) {
-        console.error("Upload error from Supabase Storage:", uploadError);
-        return res.status(500).json({
-          error:
-            uploadError.message ||
-            uploadError.error ||
-            "Kunde inte ladda upp filen (okänt storage-fel)"
-        });
+        console.error(uploadError);
+        return res.status(500).json({ error: "Kunde inte ladda upp filen" });
       }
 
-      // 2) Hämta public URL
       const { data: publicUrlData } = supabase.storage
         .from("booking-files")
         .getPublicUrl(uploadData.path);
 
       const fileUrl = publicUrlData.publicUrl;
 
-      // 3) Spara rad i booking_files
       const { data: inserted, error: insertError } = await supabase
         .from("booking_files")
         .insert([
@@ -290,9 +281,31 @@ app.post(
           .json({ error: "Filen laddades upp, men kunde inte sparas i databasen" });
       }
 
+      // 🔹 NY DEL: kalla AI-analysen direkt efter uppladdning
+      try {
+        // Vi antar att din AI-route redan finns:
+        // POST /api/admin/bookings/:id/offer-ai/analyze  body: { file_url }
+        await fetch(
+          `${process.env.API_BASE_URL || "http://localhost:3000"}/api/admin/bookings/${bookingId}/offer-ai/analyze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              // samma admin-secret som requireAdmin använder
+              Authorization: `Bearer ${process.env.ADMIN_SECRET}`
+            },
+            body: JSON.stringify({ file_url: fileUrl })
+          }
+        );
+      } catch (aiErr) {
+        console.error("AI-analys misslyckades (men filen finns kvar):", aiErr);
+        // vi failar inte hela requesten – filen är uppladdad ändå
+      }
+
       res.json({
         success: true,
-        file: inserted
+        message: "Offertfil uppladdad. AI-analys körs i bakgrunden.",
+        file_url: fileUrl
       });
     } catch (err) {
       console.error("Fel vid fil-upload:", err);

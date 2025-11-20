@@ -1,13 +1,17 @@
 import multer from "multer";
-
-const upload = multer({ storage: multer.memoryStorage() });
-
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai"; // 👈 NY
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 dotenv.config();
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 const app = express();
 app.use(cors());
@@ -374,6 +378,197 @@ app.post(
     }
   }
 );
+// -----------------------------------------------------------
+// ADMIN: AI-analys av offertbild (via GPT-4o mini)
+// body: { file_url: "https://..." }
+// -----------------------------------------------------------
+app.post("/api/admin/bookings/:id/offer-ai/analyze", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const bookingId = req.params.id;
+  const { file_url } = req.body;
+
+  if (!file_url) {
+    return res.status(400).json({ error: "file_url saknas" });
+  }
+
+  try {
+    // 1) Be modellen läsa av bilden och returnera JSON
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Du tolkar fotade offerter från företaget QualityLife. " +
+            "Returnera ALLTID ENBART giltig JSON, utan förklaringar, utan backticks."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `
+Du får en bild på en offert från QualityLife.
+
+1) Läs all text på offerten.
+2) Identifiera:
+   - kundens namn (NAMN)
+   - adress (ADRESS)
+   - mejl (MEJL)
+   - telefon (TELEFON)
+   - datum & tid (DATUM & TID)
+   - rader i prislistan (Madrass, Matta/kvm, Soffa, etc.) med pris, antal, totalt
+   - totala beloppet (Att betala)
+   - RUT-avdrag om det finns
+3) Returnera ENBART JSON med följande format:
+
+{
+  "ocr_text": "...all läsbar text från offerten...",
+  "structured": {
+    "customer_name": "",
+    "address": "",
+    "email": "",
+    "phone": "",
+    "visit_datetime": "",
+    "items": [
+      { "service": "Madrass", "unit_price": 1200, "quantity": 1, "total": 1200 }
+    ],
+    "extra_costs": [
+      { "label": "Utkörning, maskinhyra, medel, etc", "amount": 500 }
+    ],
+    "rut_deduction": 0,
+    "total": 0
+  }
+}
+
+Fyll i så gott du kan. Svara ENBART med JSON, inga kommentarer.
+              `
+            },
+            {
+              type: "image_url",
+              image_url: { url: file_url }
+            }
+          ]
+        }
+      ]
+    });
+
+    const content = completion.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      return res.status(500).json({ error: "Tomt svar från AI-modellen" });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      console.error("Kunde inte pars:a AI-svar som JSON:", content);
+      return res
+        .status(500)
+        .json({ error: "AI-svaret var inte giltig JSON", raw: content });
+    }
+
+    const rawText = parsed.ocr_text || null;
+    const structured = parsed.structured || parsed;
+
+    // 2) Spara i offert_ai_data
+    const { data: aiRow, error: aiError } = await supabase
+      .from("offert_ai_data")
+      .insert([
+        {
+          booking_id: bookingId,
+          raw_text: rawText,
+          json_data: structured
+        }
+      ])
+      .select()
+      .single();
+
+    if (aiError) {
+      console.error(aiError);
+      return res
+        .status(500)
+        .json({ error: "Kunde inte spara AI-data i offert_ai_data" });
+    }
+
+    // 3) Uppdatera bookings med några nyckelfält (om de finns)
+    const bookingUpdate = {};
+    if (structured.customer_name) {
+      bookingUpdate.offer_customer_name = structured.customer_name;
+    }
+    if (structured.address) {
+      bookingUpdate.offer_customer_address = structured.address;
+    }
+    if (structured.email) {
+      bookingUpdate.offer_customer_email = structured.email;
+    }
+    if (structured.phone) {
+      bookingUpdate.offer_customer_phone = structured.phone;
+    }
+    if (structured.visit_datetime) {
+      // låter AI ge en ISO-sträng om möjligt, annars lämnar vi
+      bookingUpdate.offer_visit_time = structured.visit_datetime;
+    }
+    if (
+      typeof structured.total === "number" &&
+      !Number.isNaN(structured.total)
+    ) {
+      bookingUpdate.offer_amount = structured.total;
+    }
+
+    if (Object.keys(bookingUpdate).length > 0) {
+      const { error: bookingUpdateError } = await supabase
+        .from("bookings")
+        .update(bookingUpdate)
+        .eq("id", bookingId);
+
+      if (bookingUpdateError) {
+        console.error("Kunde inte uppdatera bookings med offertdata:", bookingUpdateError);
+        // men vi låter ändå AI-svaret gå igenom
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "AI-analys klar",
+      ai: aiRow
+    });
+  } catch (err) {
+    console.error("Fel i offer-ai/analyze:", err);
+    res.status(500).json({
+      error: "Tekniskt fel vid AI-analys",
+      detail: err.message
+    });
+  }
+});
+
+// -----------------------------------------------------------
+// ADMIN: Hämta senaste AI-offertanalys för en bokning
+// -----------------------------------------------------------
+app.get("/api/admin/bookings/:id/offer-ai", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const bookingId = req.params.id;
+
+  const { data, error } = await supabase
+    .from("offert_ai_data")
+    .select("id, booking_id, raw_text, json_data, created_at")
+    .eq("booking_id", bookingId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Kunde inte hämta AI-data" });
+  }
+
+  if (!data || data.length === 0) {
+    return res.json({ ai: null });
+  }
+
+  return res.json({ ai: data[0] });
+});
 
 
 // -----------------------------------------------------------

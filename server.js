@@ -318,6 +318,62 @@ app.get("/api/admin/bookings/:id/files", async (req, res) => {
   res.json(data || []);
 });
 
+// -----------------------------------------------------------
+// ADMIN: AI-offertanalys (skelett, utan AI än)
+// -----------------------------------------------------------
+app.post(
+  "/api/admin/bookings/:id/offer-ai",
+  (req, res, next) => {
+    if (!requireAdmin(req, res)) return;
+    next();
+  },
+  upload.single("file"),
+  async (req, res) => {
+    const bookingId = req.params.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Ingen fil mottagen." });
+    }
+
+    try {
+      const file = req.file;
+      const safeName = file.originalname.replace(/\s+/g, "_");
+      const filePath = `${bookingId}/offer-${Date.now()}-${safeName}`;
+
+      // 1. Ladda upp fil till Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("booking-files")
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error(uploadError);
+        return res.status(500).json({ error: "Kunde inte ladda upp offertfilen" });
+      }
+
+      // 2. Hämta public URL
+      const { data: publicUrlData } = supabase.storage
+        .from("booking-files")
+        .getPublicUrl(uploadData.path);
+
+      const fileUrl = publicUrlData.publicUrl;
+
+      // 3. Här ska OCR & AI ske senare
+      // Just nu returnerar vi bara att filen laddats upp
+      res.json({
+        success: true,
+        message: "Offertfil uppladdad – AI-tolkning implementeras i nästa steg.",
+        file_url: fileUrl
+      });
+
+    } catch (err) {
+      console.error("Fel i AI-offert-route:", err);
+      res.status(500).json({ error: "Tekniskt fel vid offertupload" });
+    }
+  }
+);
 
 
 // -----------------------------------------------------------

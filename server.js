@@ -1,3 +1,7 @@
+import multer from "multer";
+
+const upload = multer({ storage: multer.memoryStorage() });
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -87,7 +91,9 @@ app.post("/api/book", async (req, res) => {
         address,
         phone,
         email,
-        seller_name: seller_name || null
+        seller_name: seller_name || null,
+        // 👇 EXAKT samma värde som du skickar till Google Sheets
+        start_time: timeRow.start_time
       }
     ])
     .select()
@@ -192,14 +198,16 @@ app.delete("/api/admin/times/:id", async (req, res) => {
   res.json({ success: true, message: "Tid borttagen (om den var obokad)" });
 });
 // -----------------------------------------------------------
-// ADMIN: Hämta bokningar (så admin ser vem som bokat)
+// ADMIN: Hämta bokningar (inkl. besökstid/start_time)
 // -----------------------------------------------------------
 app.get("/api/admin/bookings", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const { data, error } = await supabase
     .from("bookings")
-    .select("id, time_id, name, address, phone, email, created_at, seller_name")
+    .select(
+      "id, time_id, name, address, phone, email, created_at, seller_name, start_time"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -207,8 +215,105 @@ app.get("/api/admin/bookings", async (req, res) => {
     return res.status(500).json({ error: "Kunde inte hämta bokningar" });
   }
 
-  res.json(data);
+  res.json(data || []);
 });
+// -----------------------------------------------------------
+// ADMIN: Ladda upp fil kopplad till en bokning
+// form-data: field "file"
+// -----------------------------------------------------------
+app.post(
+  "/api/admin/bookings/:id/files",
+  (req, res, next) => {
+    if (!requireAdmin(req, res)) return;
+    next();
+  },
+  upload.single("file"),
+  async (req, res) => {
+    const bookingId = req.params.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Ingen fil mottagen. Använd field 'file'." });
+    }
+
+    try {
+      const file = req.file;
+      const fileExt = file.originalname.split(".").pop();
+      const safeName = file.originalname.replace(/\s+/g, "_");
+      const filePath = `${bookingId}/${Date.now()}-${safeName}`;
+
+      // 1) Ladda upp till Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("booking-files") // <- bucket-namnet du skapade
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error(uploadError);
+        return res.status(500).json({ error: "Kunde inte ladda upp filen" });
+      }
+
+      // 2) Hämta public URL
+      const { data: publicUrlData } = supabase.storage
+        .from("booking-files")
+        .getPublicUrl(uploadData.path);
+
+      const fileUrl = publicUrlData.publicUrl;
+
+      // 3) Spara rad i booking_files
+      const { data: inserted, error: insertError } = await supabase
+        .from("booking_files")
+        .insert([
+          {
+            booking_id: bookingId,
+            file_name: file.originalname,
+            file_url: fileUrl
+          }
+        ])
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error(insertError);
+        return res
+          .status(500)
+          .json({ error: "Filen laddades upp, men kunde inte sparas i databasen" });
+      }
+
+      res.json({
+        success: true,
+        file: inserted
+      });
+    } catch (err) {
+      console.error("Fel vid fil-upload:", err);
+      res.status(500).json({ error: "Tekniskt fel vid fil-upload" });
+    }
+  }
+);
+// -----------------------------------------------------------
+// ADMIN: Hämta filer för en specifik bokning
+// -----------------------------------------------------------
+app.get("/api/admin/bookings/:id/files", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const bookingId = req.params.id;
+
+  const { data, error } = await supabase
+    .from("booking_files")
+    .select("id, file_name, file_url, created_at")
+    .eq("booking_id", bookingId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Kunde inte hämta filer" });
+  }
+
+  res.json(data || []);
+});
+
+
 
 // -----------------------------------------------------------
 // START SERVER

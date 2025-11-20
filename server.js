@@ -243,15 +243,20 @@ app.post(
 
       // 1) Ladda upp till Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("booking-files") // <- bucket-namnet du skapade
+        .from("booking-files")
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
           upsert: false
         });
 
       if (uploadError) {
-        console.error(uploadError);
-        return res.status(500).json({ error: "Kunde inte ladda upp filen" });
+        console.error("Upload error from Supabase Storage:", uploadError);
+        return res.status(500).json({
+          error:
+            uploadError.message ||
+            uploadError.error ||
+            "Kunde inte ladda upp filen (okänt storage-fel)"
+        });
       }
 
       // 2) Hämta public URL

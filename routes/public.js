@@ -34,85 +34,51 @@ router.post("/book", async (req, res) => {
             .json({ error: "time_id, name, address, phone och email krävs" });
     }
 
-    // 1. Kolla att tiden finns och inte redan är bokad
-    const { data: timeRow, error: timeError } = await supabase
-        .from("available_times")
-        .select("*")
-        .eq("id", time_id)
-        .single();
+    // Anropa vår nya Postgres-funktion (RPC) för race-safe bokning
+    const { data: result, error: rpcError } = await supabase.rpc("book_time_slot", {
+        p_time_id: time_id,
+        p_name: name,
+        p_address: address,
+        p_phone: phone,
+        p_email: email,
+        p_seller_name: seller_name || null
+    });
 
-    if (timeError || !timeRow) {
-        return res.status(400).json({ error: "Tiden finns inte" });
+    if (rpcError) {
+        console.error("RPC Error:", rpcError);
+        return res.status(500).json({ error: "Ett tekniskt fel uppstod vid bokning." });
     }
 
-    if (timeRow.is_booked) {
-        return res.status(400).json({ error: "Tiden är redan bokad" });
+    // result är JSONB från funktionen: { success: true/false, booking_id, error, ... }
+    if (!result || !result.success) {
+        return res.status(400).json({ error: result?.error || "Bokningen misslyckades" });
     }
 
-    // 2. Skapa bokningen och få tillbaka raden (inkl. id)
-    const { data: bookingRow, error: bookingError } = await supabase
-        .from("bookings")
-        .insert([
-            {
+    // Bokning lyckades!
+    const bookingId = result.booking_id;
+    const startTime = result.start_time;
+
+    // 4. Skicka till Google Apps Script (Webhook) - "Fire and forget"
+    const webhookUrl = process.env.APPS_SCRIPT_WEBHOOK_URL;
+    if (webhookUrl) {
+        // Vi kör detta asynkront utan await för att inte blockera svaret till kund
+        fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                booking_id: bookingId,
                 time_id,
                 name,
                 address,
                 phone,
                 email,
-                seller_name: seller_name || null,
-                start_time: timeRow.start_time
-            }
-        ])
-        .select()
-        .single();
-
-    if (bookingError) {
-        console.error(bookingError);
-        return res.status(500).json({ error: "Kunde inte spara bokningen" });
+                start_time: startTime,
+                seller_name: seller_name || null
+            })
+        }).catch(err => console.error("Webhook fail:", err));
     }
 
-    // 3. Markera tiden som bokad
-    const { error: updateError } = await supabase
-        .from("available_times")
-        .update({ is_booked: true })
-        .eq("id", time_id);
-
-    if (updateError) {
-        console.error(updateError);
-        return res
-            .status(500)
-            .json({ error: "Bokningen sparades men kunde inte uppdatera tiden" });
-    }
-
-    // 4. Skicka till Google Apps Script (Google Sheets + mail)
-    const webhookUrl = process.env.APPS_SCRIPT_WEBHOOK_URL;
-    if (webhookUrl) {
-        try {
-            await fetch(webhookUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    booking_id: bookingRow.id,
-                    time_id,
-                    name,
-                    address,
-                    phone,
-                    email,
-                    start_time: timeRow.start_time,
-                    seller_name: seller_name || null
-                })
-            });
-        } catch (err) {
-            console.error("Kunde inte anropa Apps Script-webhook:", err);
-        }
-    } else {
-        console.warn("Ingen APPS_SCRIPT_WEBHOOK_URL satt i .env");
-    }
-
-    // 5. Svar tillbaka till frontend
-    res.json({ success: true, message: "Bokning klar" });
+    res.json({ success: true, message: "Bokning klar", booking_id: bookingId });
 });
 
 export default router;

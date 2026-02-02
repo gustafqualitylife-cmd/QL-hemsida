@@ -27,15 +27,17 @@ router.use(requireSellerOrAdmin);
 // -----------------------------------------------------------
 // SÄLJARE: Hämta sina tilldelade bokningar
 // -----------------------------------------------------------
+// -----------------------------------------------------------
+// SÄLJARE: Hämta sina tilldelade bokningar
+// -----------------------------------------------------------
 router.get("/my-bookings", async (req, res) => {
     const userId = req.user.id;
 
     const { data, error } = await supabase
         .from("bookings")
         .select(`
-      id, time_id, name, address, phone, email, 
-      seller_name, start_time, status, payment_status,
-      created_at
+      *,
+      available_times ( start_time )
     `)
         .eq("seller_user_id", userId)
         .order("start_time", { ascending: true });
@@ -46,6 +48,36 @@ router.get("/my-bookings", async (req, res) => {
     }
 
     res.json(data || []);
+});
+
+// -----------------------------------------------------------
+// SÄLJARE: Hämta en specifik bokning (Detaljvy)
+// -----------------------------------------------------------
+router.get("/bookings/:id", async (req, res) => {
+    const userId = req.user.id;
+    const bookingId = req.params.id;
+
+    const { data, error } = await supabase
+        .from("bookings")
+        .select(`
+      *,
+      booking_files (*),
+      offert_ai_data (*)
+    `)
+        .eq("id", bookingId)
+        .eq("seller_user_id", userId)
+        .single();
+
+    if (error) {
+        console.error(error);
+        return res.status(500).json({ error: "Could not fetch booking details" });
+    }
+
+    if (!data) {
+        return res.status(404).json({ error: "Booking not found" });
+    }
+
+    res.json(data);
 });
 
 // -----------------------------------------------------------

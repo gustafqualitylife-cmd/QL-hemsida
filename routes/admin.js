@@ -149,9 +149,19 @@ router.delete("/times/:id", async (req, res) => {
 // -----------------------------------------------------------
 // ADMIN: Filer och AI (Upload koden återanvänds men nu med req.user)
 // -----------------------------------------------------------
+// -----------------------------------------------------------
+// ADMIN: Filer och AI (Upload koden återanvänds men nu med req.user)
+// -----------------------------------------------------------
 router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
     const bookingId = req.params.id;
+    const { file_type } = req.req ? req.body : req.body || {}; // Safe access if multer doesn't populate it yet (it should)
+
     if (!req.file) return res.status(400).json({ error: "Ingen fil." });
+
+    // Validera file_type
+    // Admin kan ladda upp vad som helst, default 'other'
+    const validTypes = ['offer', 'before', 'after', 'other'];
+    const type = validTypes.includes(req.body.file_type) ? req.body.file_type : 'other';
 
     try {
         const file = req.file;
@@ -177,17 +187,17 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
                 file_url: publicUrlData.publicUrl,
                 uploaded_by_user_id: req.user.id,
                 uploaded_by_role: 'admin',
-                file_type: 'other' // admin upload default
+                file_type: type
             }])
             .select()
             .single();
 
         if (insertError) throw insertError;
 
-        // Trigger AI async
-        const apiUrl = process.env.API_BASE_URL || "http://localhost:3000";
-        // NOTE: Self-call needs a token. Since we are inside the API, we might just call the logic directly
-        // or skip AI auto-trigger for now to keep it simple. User can click "Analyze".
+        // Trigger AI async (only if it's an offer)
+        if (type === 'offer') {
+            // Logic to trigger AI or just let frontend do it
+        }
 
         res.json({ success: true, file: fileRow });
     } catch (err) {

@@ -118,13 +118,21 @@ router.patch("/bookings/:id/status", async (req, res) => {
 // -----------------------------------------------------------
 // SÄLJARE: Ladda upp fil (t.ex. offertbild)
 // -----------------------------------------------------------
+// -----------------------------------------------------------
+// SÄLJARE: Ladda upp fil (t.ex. offertbild)
+// -----------------------------------------------------------
 router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
     const userId = req.user.id;
     const bookingId = req.params.id;
+    const { file_type } = req.body;
 
     if (!req.file) {
         return res.status(400).json({ error: "No file provided" });
     }
+
+    // Validera file_type
+    const validTypes = ['offer', 'before', 'after', 'other'];
+    const type = validTypes.includes(file_type) ? file_type : 'offer'; // Default to offer for sellers if not specified
 
     // Verifiera först att säljaren äger bokningen
     const { data: booking, error: checkError } = await supabase
@@ -172,7 +180,7 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
                     file_url: fileUrl,
                     uploaded_by_user_id: userId,
                     uploaded_by_role: 'seller',
-                    file_type: 'offer' // Default or passed in body? Defaulting to offer for now
+                    file_type: type
                 }
             ])
             .select()

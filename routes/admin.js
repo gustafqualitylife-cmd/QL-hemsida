@@ -126,8 +126,8 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
         if (dbError) throw dbError;
         res.json({ success: true, file: fileRow });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Upload failed" });
+        console.error("Admin Upload error:", err);
+        res.status(500).json({ error: "Upload failed: " + err.message });
     }
 });
 

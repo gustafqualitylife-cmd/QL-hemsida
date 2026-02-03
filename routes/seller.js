@@ -163,8 +163,8 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
             });
 
         if (uploadError) {
-            console.error("Upload error:", uploadError);
-            return res.status(500).json({ error: "Upload failed" });
+            console.error("Storage upload error:", uploadError);
+            return res.status(500).json({ error: "Storage Upload failed: " + (uploadError.message || JSON.stringify(uploadError)) });
         }
 
         const { data: publicUrlData } = supabase.storage
@@ -197,8 +197,8 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
         res.json({ success: true, file: fileRow });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server error during upload" });
+        console.error("Seller Upload catch error:", err);
+        res.status(500).json({ error: "Server error during upload: " + err.message });
     }
 });
 

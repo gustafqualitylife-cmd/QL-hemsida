@@ -33,18 +33,16 @@ router.use(requireSellerOrAdmin);
 router.get("/my-bookings", async (req, res) => {
     const userId = req.user.id;
 
+    // TEMPORARY: Simplified query without JOIN
     const { data, error } = await supabase
         .from("bookings")
-        .select(`
-      *,
-      available_times ( start_time )
-    `)
+        .select("*")
         .eq("seller_user_id", userId)
-        .order("start_time", { ascending: true });
+        .order("created_at", { ascending: false });
 
     if (error) {
-        console.error(error);
-        return res.status(500).json({ error: "Could not fetch bookings" });
+        console.error("Seller bookings error:", error);
+        return res.status(500).json({ error: "Could not fetch bookings", details: error.message });
     }
 
     res.json(data || []);
@@ -57,25 +55,30 @@ router.get("/bookings/:id", async (req, res) => {
     const userId = req.user.id;
     const bookingId = req.params.id;
 
+    // TEMPORARY: Simplified query without JOIN
     const { data, error } = await supabase
         .from("bookings")
-        .select(`
-      *,
-      booking_files (*),
-      offert_ai_data (*)
-    `)
+        .select("*")
         .eq("id", bookingId)
         .eq("seller_user_id", userId)
         .single();
 
     if (error) {
-        console.error(error);
-        return res.status(500).json({ error: "Could not fetch booking details" });
+        console.error("Seller booking detail error:", error);
+        return res.status(500).json({ error: "Could not fetch booking details", details: error.message });
     }
 
     if (!data) {
         return res.status(404).json({ error: "Booking not found" });
     }
+
+    // Fetch files separately to avoid JOIN issues
+    const { data: files } = await supabase
+        .from("booking_files")
+        .select("*")
+        .eq("booking_id", bookingId);
+
+    data.files = files || [];
 
     res.json(data);
 });

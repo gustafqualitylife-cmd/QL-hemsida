@@ -210,4 +210,103 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
 // For brevity, keeping the rest of AI logic but assuming it uses the new auth or is adapted.
 // I will keep the previous AI analysis endpoint but updated for validation.
 
+
+// -----------------------------------------------------------
+// ADMIN: Kampanjkoder CRUD
+// -----------------------------------------------------------
+
+// LISTERA
+router.get("/promo-codes", async (req, res) => {
+    const { data, error } = await supabase
+        .from("promo_codes")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        console.error(error);
+        return res.status(500).json({ error: "Kunde inte hämta kampanjkoder" });
+    }
+    res.json(data || []);
+});
+
+// SKAPA
+router.post("/promo-codes", async (req, res) => {
+    // fields: code, discount_percent, usage_limit, active, starts_at, ends_at, notes, seller_user_id (optional, global if null)
+    // admin can create code for any seller or global
+    const {
+        code,
+        discount_percent,
+        active,
+        starts_at,
+        ends_at,
+        usage_limit,
+        notes,
+        seller_user_id
+    } = req.body;
+
+    if (!code) return res.status(400).json({ error: "Kampanjkod krävs" });
+
+    const { data, error } = await supabase
+        .from("promo_codes")
+        .insert([{
+            code: code.trim().toUpperCase(),
+            discount_percent: discount_percent || 50,
+            active: active !== undefined ? active : true,
+            starts_at: starts_at || null,
+            ends_at: ends_at || null,
+            usage_limit: usage_limit || null,
+            notes: notes || null,
+            seller_user_id: seller_user_id || null, // Global by default unless specified
+            created_by: req.user.id
+        }])
+        .select()
+        .single();
+
+    if (error) {
+        // Handle unique constraint violation specifically if needed
+        if (error.code === '23505') { // unique_violation
+            return res.status(400).json({ error: "Koden finns redan" });
+        }
+        console.error(error);
+        return res.status(500).json({ error: "Kunde inte skapa kampanjkod" });
+    }
+
+    res.json({ success: true, promo_code: data });
+});
+
+// UPPDATERA (Patch)
+router.patch("/promo-codes/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    // Allowed fields to update
+    const allowed = ['active', 'usage_limit', 'starts_at', 'ends_at', 'notes', 'discount_percent', 'seller_user_id'];
+    const safeUpdates = {};
+
+    for (const key of Object.keys(updates)) {
+        if (allowed.includes(key)) {
+            safeUpdates[key] = updates[key];
+        }
+    }
+
+    if (Object.keys(safeUpdates).length === 0) {
+        return res.status(400).json({ error: "Inga uppdateringar angivna" });
+    }
+
+    const { data, error } = await supabase
+        .from("promo_codes")
+        .update(safeUpdates)
+        .eq("id", id)
+        .select()
+        .single();
+
+    if (error) {
+        console.error(error);
+        return res.status(500).json({ error: "Kunde inte uppdatera kampanjkod" });
+    }
+
+    res.json({ success: true, promo_code: data });
+});
+
+
 export default router;

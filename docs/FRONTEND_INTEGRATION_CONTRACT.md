@@ -98,14 +98,37 @@ Body:
   "name": "Förnamn Efternamn",
   "address": "Adress",
   "phone": "Telefon",
-  "email": "E-post"
+  "email": "E-post",
+  "service": "mattvätt",
+  "promo_code": "TEST50" 
 }
+
+Svar (exempel):
+```json
+{
+  "success": true,
+  "booking_id": "...",
+  "base_price_sek": 1500,
+  "discount_percent": 50,
+  "final_price_sek": 750,
+  "promo_code_valid": true,
+  "promo_code_reason": null
+}
+```
+
 ⚠️ Viktigt
 Bokning är race-safe
 
 Om tiden är upptagen returneras fel
 
 Frontend måste visa tydligt felmeddelande
+
+🛑 PRISREGEL
+Backend är **enda sanningen** för pris.
+Frontend får **aldrig** räkna ut priset själv.
+Frontend får **aldrig** validera kampanjkoder lokalt.
+Frontend visar endast svaret från backend.
+Om ogiltig kod: Bokning genomförs till ordinarie pris, `promo_code_valid: false`.
 
 5. Vy 2: Säljvy (inloggad)
 Säljare får:
@@ -176,6 +199,10 @@ Lista bokningar
 GET /api/admin/bookings
 Lista säljare
 GET /api/admin/sellers
+Kampanjkoder
+GET /api/admin/promo-codes
+POST /api/admin/promo-codes
+PATCH /api/admin/promo-codes/:id
 Tilldela säljare
 PATCH /api/admin/bookings/:id/assign
 Body:

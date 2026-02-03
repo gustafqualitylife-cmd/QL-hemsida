@@ -58,7 +58,69 @@ router.get("/bookings/:id", async (req, res) => {
     res.json(data);
 });
 
+// -----------------------------------------------------------
+// ADMIN: Ladda upp fil
+// -----------------------------------------------------------
+router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
+    const bookingId = req.params.id;
+    const { file_type } = req.body;
+
+    if (!req.file) return res.status(400).json({ error: "Ingen fil." });
+
+    try {
+        const file = req.file;
+        const safeName = file.originalname.replace(/\s+/g, "_");
+        const filePath = `${bookingId}/${Date.now()}-${safeName}`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from("booking-files")
+            .upload(filePath, file.buffer, {
+                contentType: file.mimetype,
+                upsert: false
+            });
+
+        if (uploadError) {
+            console.error("Upload error:", uploadError);
+            return res.status(500).json({ error: "Upload failed" });
+        }
+
+        const { data: publicUrlData } = supabase.storage
+            .from("booking-files")
+            .getPublicUrl(uploadData.path);
+
+        const fileUrl = publicUrlData.publicUrl;
+
+        // Spara i DB
+        const { data: fileRow, error: dbError } = await supabase
+            .from("booking_files")
+            .insert([
+                {
+                    booking_id: bookingId,
+                    file_name: file.originalname,
+                    file_url: fileUrl,
+                    uploaded_by_user_id: req.user.id,
+                    uploaded_by_role: 'admin',
+                    file_type: file_type || 'other'
+                }
+            ])
+            .select()
+            .single();
+
+        if (dbError) {
+            console.error("DB insert error:", dbError);
+            return res.status(500).json({ error: "File uploaded but DB record failed" });
+        }
+
+        res.json({ success: true, file: fileRow });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Server error during upload" });
+    }
+});
+
 router.patch("/bookings/:id/assign", async (req, res) => {
+
     const { seller_user_id, seller_name } = req.body;
     const bookingId = req.params.id;
 
@@ -246,8 +308,9 @@ router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
 });
 
 // ... AI logic can remain similar or requireAuth updated
-// For brevity, keeping the rest of AI logic but assuming it uses the new auth or is adapted.
-// I will keep the previous AI analysis endpoint but updated for validation.
+res.status(500).json({ error: "Server error during upload" });
+    }
+});
 
 
 // -----------------------------------------------------------

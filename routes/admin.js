@@ -247,75 +247,11 @@ router.delete("/times/:id", async (req, res) => {
     res.json({ success: true, message: "Tid borttagen" });
 });
 
-// -----------------------------------------------------------
-// ADMIN: Filer och AI (Upload koden återanvänds men nu med req.user)
-// -----------------------------------------------------------
-// -----------------------------------------------------------
-// ADMIN: Filer och AI (Upload koden återanvänds men nu med req.user)
-// -----------------------------------------------------------
-router.post("/bookings/:id/files", upload.single("file"), async (req, res) => {
-    const bookingId = req.params.id;
-    const { file_type } = req.req ? req.body : req.body || {}; // Safe access if multer doesn't populate it yet (it should)
-
-    if (!req.file) return res.status(400).json({ error: "Ingen fil." });
-
-    // Validera file_type
-    // Admin kan ladda upp vad som helst, default 'other'
-    const validTypes = ['offer', 'before', 'after', 'other'];
-    const type = validTypes.includes(req.body.file_type) ? req.body.file_type : 'other';
-
-    try {
-        const file = req.file;
-        const safeName = file.originalname.replace(/\s+/g, "_");
-        const filePath = `${bookingId}/${Date.now()}-${safeName}`;
-
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from("booking-files")
-            .upload(filePath, file.buffer, { contentType: file.mimetype });
-
-        if (uploadError) throw uploadError;
-
-        const { data: publicUrlData } = supabase.storage
-            .from("booking-files")
-            .getPublicUrl(uploadData.path);
-
-        // Save to DB
-        const { data: fileRow, error: insertError } = await supabase
-            .from("booking_files")
-            .insert([{
-                booking_id: bookingId,
-                file_name: file.originalname,
-                file_url: publicUrlData.publicUrl,
-                uploaded_by_user_id: req.user.id,
-                uploaded_by_role: 'admin',
-                file_type: type
-            }])
-            .select()
-            .single();
-
-        if (insertError) throw insertError;
-
-        // Trigger AI async (only if it's an offer)
-        if (type === 'offer') {
-            // Logic to trigger AI or just let frontend do it
-        }
-
-        res.json({ success: true, file: fileRow });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Upload failed" });
-    }
-});
-
-// ... AI logic can remain similar or requireAuth updated
-res.status(500).json({ error: "Server error during upload" });
-    }
-});
-
 
 // -----------------------------------------------------------
 // ADMIN: Kampanjkoder CRUD
 // -----------------------------------------------------------
+
 
 // LISTERA
 router.get("/promo-codes", async (req, res) => {

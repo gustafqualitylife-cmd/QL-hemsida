@@ -29,8 +29,35 @@ router.get("/bookings", async (req, res) => {
 });
 
 // -----------------------------------------------------------
-// ADMIN: Tilldela säljare
+// ADMIN: Hämta en specifik bokning
 // -----------------------------------------------------------
+router.get("/bookings/:id", async (req, res) => {
+    const bookingId = req.params.id;
+
+    const { data, error } = await supabase
+        .from("bookings")
+        .select("*")
+        .eq("id", bookingId)
+        .single();
+
+    if (error) {
+        console.error("Admin booking detail error:", error);
+        return res.status(500).json({ error: "Could not fetch booking details" });
+    }
+
+    if (!data) return res.status(404).json({ error: "Booking not found" });
+
+    // Fetch files
+    const { data: files } = await supabase
+        .from("booking_files")
+        .select("*")
+        .eq("booking_id", bookingId);
+
+    data.files = files || [];
+
+    res.json(data);
+});
+
 router.patch("/bookings/:id/assign", async (req, res) => {
     const { seller_user_id, seller_name } = req.body;
     const bookingId = req.params.id;

@@ -130,6 +130,22 @@ Frontend får **aldrig** validera kampanjkoder lokalt.
 Frontend visar endast svaret från backend.
 Om ogiltig kod: Bokning genomförs till ordinarie pris, `promo_code_valid: false`.
 
+### Verifierat backend-beteende (kampanjkoder)
+
+Följande beteende är implementerat och manuellt verifierat:
+
+- Kampanjkod valideras endast i backend.
+- Kampanjkod kräver ingen inloggning.
+- Kampanjkod kräver ingen seller-koppling i v1.
+- Ogiltig eller förbrukad kod:
+  - bokning skapas ändå
+  - pris sätts till ordinarie
+  - frontend ska visa backendens svar utan egen logik
+- usage_limit hanteras race-safe i backend.
+
+Frontend ska inte försöka tolka eller återskapa denna logik.
+
+
 5. Vy 2: Säljvy (inloggad)
 Säljare får:
 

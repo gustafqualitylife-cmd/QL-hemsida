@@ -49,6 +49,20 @@ Exempel:
 
 ---
 
+### Kampanjkoder
+
+Kampanjkoder är färdigimplementerade.
+
+AI får inte:
+- ändra hur usage_limit fungerar
+- stoppa bokningar vid ogiltig kod
+- flytta prislogik till frontend
+- kräva seller-koppling för rabatt i v1
+
+Om förändring önskas ska nytt beslut dokumenteras i DECISIONS.md.
+
+---
+
 ## Hur kod levereras
 AI ska alltid leverera i denna ordning:
 

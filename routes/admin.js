@@ -113,8 +113,22 @@ router.get("/sellers", async (req, res) => {
 
 
 // -----------------------------------------------------------
-// ADMIN: Management av tider (kvar från förr)
+// ADMIN: Management av tider
 // -----------------------------------------------------------
+// GET all times (for calendar view)
+router.get("/times", async (req, res) => {
+    const { data, error } = await supabase
+        .from("available_times")
+        .select("*")
+        .order("start_time", { ascending: true });
+
+    if (error) {
+        console.error("Admin get times error:", error);
+        return res.status(500).json({ error: "Kunde inte hämta tider" });
+    }
+    res.json(data || []);
+});
+
 router.post("/times", async (req, res) => {
     const { start_time } = req.body;
     if (!start_time) return res.status(400).json({ error: "start_time krävs" });

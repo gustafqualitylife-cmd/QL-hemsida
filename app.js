@@ -13,9 +13,9 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use("/api", publicRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/seller", sellerRoutes);
+app.use("/api", publicRoutes);
 
 // Health check
 app.get("/", (req, res) => {

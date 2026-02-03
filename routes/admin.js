@@ -14,17 +14,15 @@ router.use(requireRole('admin'));
 // ADMIN: Hämta bokningar (inkl. besökstid/start_time)
 // -----------------------------------------------------------
 router.get("/bookings", async (req, res) => {
+    // TEMPORARY: Simplified query without JOIN to debug 500 error
     const { data, error } = await supabase
         .from("bookings")
-        .select(`
-      *,
-      available_times ( start_time )
-    `)
+        .select("*")
         .order("created_at", { ascending: false });
 
     if (error) {
-        console.error(error);
-        return res.status(500).json({ error: "Kunde inte hämta bokningar" });
+        console.error("Admin bookings error:", error);
+        return res.status(500).json({ error: "Kunde inte hämta bokningar", details: error.message });
     }
 
     res.json(data || []);

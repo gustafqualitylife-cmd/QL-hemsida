@@ -1,64 +1,110 @@
-# Frontend Ultra Brief – QualityLife Booking
+# Frontend Ultra Brief – QualityLife Booking System
 
-Syfte
-Bygg en enkel, snabb och säker frontend som kopplar mot vår befintliga backend på Render och använder Supabase Auth för admin och säljare.
+## Arkitektur
 
-Teknikval
-Frontend byggs i befintliga 11ty-projektet.
-Ingen separat frontend-app i första versionen.
-All interaktivitet görs med små JS-moduler (”JS islands”) i 11ty.
+Systemet är uppdelat på **två separata domäner** med **tre delar**:
 
-Miljöer
-Backend Base URL:
-https://ql-hemsida.onrender.com
+---
 
-Supabase Project URL:
-https://joynmufuivwwyhfnbeae.supabase.co
+### Del 1 – Bokningskomponent (Eleventy-site, kunddomän)
+- Byggs som en isolerad HTML + vanilla JS komponent
+- Inget framework, inga externa dependencies utöver Supabase JS (om nödvändigt)
+- Följer befintlig CSS-struktur i Eleventy-projektet
+- Ingen inloggning
+- Byggs separat och kopplas in i Eleventy-sidan
 
-Roller
-Kund: ingen inloggning.
-Säljare: Supabase Auth, ser endast tilldelade bokningar.
-Admin: Supabase Auth, ser allt och kan tilldela.
+### Del 2 & 3 – Dashboard-app (intern domän, t.ex. `admin.qualitylife.se`)
+- Byggs som en separat fristående app (React + Tailwind rekommenderas)
+- Innehåller både säljar-dashboard och admin-dashboard
+- Supabase Auth för inloggning
+- Hålls **helt separat** från Eleventy-siten
 
-Sidor som ska byggas (MVP)
-1. /boka
-Visar tider från GET /api/times och bokningsform som POST /api/book.
+---
 
-2. /seller/login
-Inloggning via Supabase Auth.
-Efter login: redirect till /seller
+## Miljöer
 
-3. /seller
-Lista: GET /api/seller/my-bookings
+**Backend Base URL:** `https://ql-hemsida.onrender.com`
+**Supabase Project URL:** `https://joynmufuivwwyhfnbeae.supabase.co`
 
-4. /seller/bookings/:id
-Detaljvy: GET /api/seller/bookings/:id
-Status: PATCH /api/seller/bookings/:id/status
-Filuppladdning: POST /api/seller/bookings/:id/files (form-data)
+---
 
-5. /admin/login
-Inloggning via Supabase Auth.
-Efter login: redirect till /admin
+## Del 1: Bokningskomponent
 
-6. /admin
-Lista: GET /api/admin/bookings
-Lista säljare: GET /api/admin/sellers
-Tilldela: PATCH /api/admin/bookings/:id/assign
-Ändra status/betalning: PATCH /api/admin/bookings/:id
+**Placering:** Inbyggd i befintlig Eleventy-sida (t.ex. `/boka`)
+**Teknik:** HTML + vanilla JS
+**CSS:** Följer befintlig CSS-struktur
 
-Behov för UI
-Tydliga felmeddelanden
-Loading-states på alla anrop
-Mobil-first för seller
-Desktop för admin
+Funktioner:
+- Hämta och visa lediga tider: `GET /api/times`
+- Bokningsformulär med alla fält + kampanjkod-fält
+- Skicka bokning: `POST /api/book`
+- Visa bekräftelse med pris och eventuell rabatt
 
-Säkerhet
-JWT lagras endast i sessionStorage (MVP).
-Alla skyddade requests skickar Authorization: Bearer <JWT>.
-Vid 401/403: redirect till login.
+---
 
-Definition of Done (MVP)
-Kund kan boka en tid och får tydlig bekräftelse.
-Admin kan logga in och se bokningar, tilldela en säljare.
-Säljare kan logga in, se sina bokningar, öppna detaljvy och ladda upp en offertbild.
-Uppladdad fil syns i booking_files och i Supabase Storage.
+## Del 2: Säljar-dashboard
+
+**Placering:** Separat domän, t.ex. `admin.qualitylife.se/seller`
+**Teknik:** React + Tailwind
+**Design:** Mobil-first
+
+### Navigation
+Meny med två sektioner:
+- **Mina bokningar** — lista över tilldelade bokningar
+- **Boka åt kund** — bokningsformulär för dörr-bokning
+
+### Sidor
+| Sida | Funktion | API |
+|------|----------|-----|
+| `/login` | Inloggning | Supabase Auth |
+| `/` | Bokningsöversikt — lista/kalender, färgkodade statusar, filterbar | `GET /api/seller/my-bookings` |
+| `/bookings/:id` | Detaljvy — status, filuppladdning, filer | `GET /api/seller/bookings/:id` `PATCH .../status` `POST .../files` |
+| `/book` | **Boka åt kund** — säljaren fyller i kundens uppgifter vid dörren, väljer tid, eventuell kampanjkod | `GET /api/times` `POST /api/book` |
+
+### Säljarens bokningsflöde (`/book`)
+- Samma formulär och API som kundflödet (`POST /api/book`)
+- `seller_name` skickas automatiskt från inloggad session
+- Säljaren kan använda en kampanjkod med `discount_percent: 100` för gratis bokning
+- Ingen ny backend-logik krävs — admin skapar koden i admin-dashboarden
+
+---
+
+## Del 3: Admin-dashboard
+
+**Placering:** Separat domän, t.ex. `admin.qualitylife.se/admin`
+**Teknik:** React + Tailwind
+**Design:** Desktop-optimerad
+
+Sidor:
+| Sida | Funktion | API |
+|------|----------|-----|
+| `/admin/login` | Inloggning | Supabase Auth |
+| `/admin` | Alla bokningar — tabell, filter, sök | `GET /api/admin/bookings` |
+| `/admin/bookings/:id` | Detaljvy — tilldela säljare, status, betalning, filer | Flera PATCH-endpoints |
+| `/admin/sellers` | Lista säljare | `GET /api/admin/sellers` |
+| `/admin/times` | Hantera tider — lägg till, ta bort | `GET/POST/DELETE /api/admin/times` |
+| `/admin/promo-codes` | Hantera kampanjkoder — skapa, aktivera, redigera | `GET/POST/PATCH /api/admin/promo-codes` |
+
+---
+
+## Säkerhet
+
+- JWT lagras i `sessionStorage` (MVP)
+- Alla skyddade requests: `Authorization: Bearer <JWT>`
+- Vid `401/403`: redirect till login
+- Aldrig skriva direkt till Supabase-databasen
+
+---
+
+## Definition of Done (MVP)
+
+- [ ] Kund kan se lediga tider och boka på Eleventy-siten
+- [ ] Kund ser tydlig bekräftelse med pris och eventuell kampanjrabatt
+- [ ] Säljare kan logga in och se sina bokningar i en snygg bokningsvy
+- [ ] Säljare kan öppna detaljvy, uppdatera status och ladda upp bild
+- [ ] Säljare kan göra en bokning åt en kund direkt via `/book`
+- [ ] Säljarens namn läggs automatiskt till på bokningen
+- [ ] Admin kan logga in och se alla bokningar
+- [ ] Admin kan tilldela säljare till en bokning
+- [ ] Admin kan hantera tider och kampanjkoder
+- [ ] Uppladdad fil syns i Supabase Storage

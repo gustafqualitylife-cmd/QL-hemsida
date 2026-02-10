@@ -91,92 +91,21 @@ export const calculatePrice = (basePrice, discountPercent) => {
  * Returns { success: bool }
  */
 export const incrementUsage = async (promoCodeId) => {
-    // Race safe update: increment ONLY if limit is null OR count < limit
-    // We rely on the SQL to enforce this logic if we construct it carefully,
-    // or we check the rows affected.
+    // 1. Check if usage limit is reached
+    const { data: promo, error: getError } = await supabase
+        .from("promo_codes")
+        .select("usage_count, usage_limit")
+        .eq("id", promoCodeId)
+        .single();
 
-    // Supabase JS doesn't support sophisticated "update where" arithmetic easily without RPC,
-    // BUT we can use a filter.
-    // However, `usage_count = usage_count + 1` is standard.
-    // The trick is the WHERE clause for the limit.
-
-    // Since we don't have a specific RPC for this yet, we will try a direct filter update 
-    // hoping Supabase passes `usage_count + 1` correctly or we might need a small RPC?
-    // Current prompt says "Inga destruktiva SQL... All DB ändring levereras som SQL".
-    // I did not create an RPC for increment.
-    // I will write the query to check conditions.
-
-    // Actually, simple increment is susceptible to race conditions if we read-then-write.
-    // We can't do `update promo_codes set usage_count = usage_count + 1` via standard JS client easily?
-    // We CAN if we don't need the limit check in the same query... but we DO.
-
-    // WORKAROUND for v1 without new RPC:
-    // We already did the optimistic check in validate.
-    // We will assume standard traffic isn't crazy high for v1.
-    // But to be SAFE, we should double check.
-
-    // Actually, we can fetch the row with formatting, but checking existing value inside UPDATE is hard in JS client.
-    // Let's rely on the optimistic check for now, and strictly checking count < limit again.
-    // It's not perfectly race safe without a DB constraint or RPC, but it's close enough for v1 unless user is strict.
-    // Wait, prompt specific requirement: "Race safe krav: Increment av usage_count måste vara atomär."
-    // "Exempel: update promo_codes set usage_count = usage_count + 1 where ..."
-
-    // I can do this with raw supabase RPC if I had one, strictly I can't do it with just the JS client *unless* I interpret the requirement as "do your best".
-    // BUT, I can probably execute raw SQL if I'm not allowed to create RPC? No.
-
-    // I will implement a 'best effort' atomic increment by fetching, checking, and updating with version match (optimistic concurrency) if I had a version field? No.
-    //
-    // WAIT! I can use `rpc` to run a query? No.
-    //
-    // OK, I will try to use the JS client's ability to sync fields if possible, or just accept the limitation.
-    // Actually, I can use a Postgres function `increment_promo_usage` if I create it.
-    // Did I create it? NO.
-    //
-    // RETROSPECTIVE: I should have added an RPC in step 2.
-    // Corrective Action: I will rely on the optimistic check + update.
-    // "update promo_codes set usage_count = usage_count + 1 where id = X" IS atomic in Postgres.
-    // The LIMIT check is the issue.
-    // I'll do: `update promo_codes set usage_count = usage_count + 1 where id = X and usage_count < usage_limit` logic.
-    // But Supabase JS `.update({ usage_count: curr + 1 })` isn't atomic if `curr` is stale.
-    //
-    // I will write a small helper using a raw SQL query logic if possible? No.
-    //
-    // Okay, I will implement it such that we lock or re-read?
-    // No, I'll stick to: Read -> Check -> Write.
-    // And add a comment that true race-safety requires RPC which was not in the SQL file.
-    // OR... wait, does existing RPC `book_time_slot` handle generic logic? No.
-
-    // Let's stick with the best possible approach using standard client:
-    // We can't do truly atomic conditional increment with standard JS client methods without an RPC.
-    // I will assume this is acceptable given I missed the RPC creation in Step 2, and I can't go back.
-    // UNLESS, I ask the user to run one more SQL script?
-    // "All DB-ändring ska levereras som SQL".
-    // I can generate a `fix_rpc.sql` and ask them to run it in the verification step or now?
-    // The prompt sequence is strict. Step 3 is "Backend implementation".
-    // I will proceed with JS logic, but maybe I simply skip the strict atomic check for the *limit* but keep the count accurate?
-    //
-    // Actually, I'll look at `routes/public.js` again. It uses `rpc("book_time_slot"...)`.
-    // I will check if I can just assume the traffic is low enough or find a clever way.
-    //
-    // Let's write the code.
-
-    const { data: current } = await supabase.from("promo_codes").select("usage_count, usage_limit").eq("id", promoCodeId).single();
-
-    if (current && current.usage_limit !== null && current.usage_count >= current.usage_limit) {
+    if (getError || !promo) return { success: false };
+    if (promo.usage_limit !== null && promo.usage_count >= promo.usage_limit) {
         return { success: false };
     }
 
-    const { error } = await supabase.rpc("increment_promo_usage", { row_id: promoCodeId });
-    // Ah, I don't have this RPC. 
-
-    // I'll use standard update:
-    const { error: updateError } = await supabase
-        .from("promo_codes")
-        .update({ usage_count: current.usage_count + 1 })
-        .eq("id", promoCodeId)
-        .eq("usage_count", current.usage_count); // Optimistic locking!
-
-    if (updateError) return { success: false };
+    // 2. Call RPC to increment
+    const { error: rpcError } = await supabase.rpc("increment_promo_usage", { row_id: promoCodeId });
+    if (rpcError) return { success: false };
 
     return { success: true };
 };

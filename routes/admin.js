@@ -193,8 +193,23 @@ router.post("/promo-codes", async (req, res) => {
 });
 
 router.patch("/promo-codes/:id", async (req, res) => {
-    const { data, error } = await supabase.from("promo_codes").update(req.body).eq("id", req.params.id).select().single();
-    if (error) return res.status(500).json({ error: "Fel vid uppdatering" });
+    const { code, discount_percent, active, usage_limit, starts_at, ends_at, notes } = req.body;
+    const updates = {};
+    if (code !== undefined) updates.code = code.trim().toUpperCase();
+    if (discount_percent !== undefined) updates.discount_percent = discount_percent;
+    if (active !== undefined) updates.active = active;
+    if (usage_limit !== undefined) updates.usage_limit = usage_limit;
+    if (starts_at !== undefined) updates.starts_at = starts_at;
+    if (ends_at !== undefined) updates.ends_at = ends_at;
+    if (notes !== undefined) updates.notes = notes;
+
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: "Inga giltiga fält att uppdatera" });
+
+    const { data, error } = await supabase.from("promo_codes").update(updates).eq("id", req.params.id).select().single();
+    if (error) {
+        console.error("Promo update error:", error);
+        return res.status(500).json({ error: "Fel vid uppdatering" });
+    }
     res.json({ success: true, promo_code: data });
 });
 

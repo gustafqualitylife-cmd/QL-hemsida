@@ -1,4 +1,4 @@
-# FRONTEND ↔ BACKEND INTEGRATION SPEC  
+# FRONTEND ↔ BACKEND INTEGRATION SPEC
 ## QualityLife Booking System
 
 ---
@@ -13,86 +13,104 @@ AI ska följa detta dokument strikt och **inte anta något** som inte uttrycklig
 
 ## 1. Systemöversikt
 
-Systemet består av tre användarvyer:
+Systemet består av **tre separata frontend-delar** på **två separata domäner**:
 
-- Publik kundvy (ingen inloggning)
-- Säljvy (inloggad via Supabase Auth)
-- Adminvy (inloggad via Supabase Auth)
+### Domän 1: Befintlig Eleventy-site (kunddomän)
+- **Bokningskomponent** — inbyggd i befintlig Eleventy-site som en isolerad HTML/JS-komponent
+- Ingen inloggning krävs
+- Ska följa befintlig CSS-struktur i Eleventy-projektet
+
+### Domän 2: Dashboard-app (intern domän, t.ex. `admin.qualitylife.se`)
+- **Säljar-dashboard** — inloggad vy för säljare
+- **Admin-dashboard** — inloggad vy för admin
+- Helt separat från kunddomänen
+- Byggs som en fristående app (React + Tailwind rekommenderas)
 
 Backend är färdig, säker och race-safe.
-
 Frontend ska **endast konsumera existerande API-endpoints**.
 
 ---
 
 ## 2. Teknikförutsättningar (låst)
 
-Frontend ska:
+### Bokningskomponent (Eleventy)
+- Ren HTML + vanilla JS (inga frameworks)
+- Följer befintlig CSS-struktur i Eleventy-projektet
+- Ingen Supabase Auth krävs
+- Kommunicerar direkt med backend-API
 
-- Använda Supabase Auth för inloggning
-- Skicka JWT i Authorization-header
-- Aldrig använda legacy tokens
+### Dashboard-app (separat domän)
+- React + Tailwind (rekommenderat)
+- Supabase Auth för inloggning
+- JWT skickas i Authorization-header på alla skyddade anrop
 - Aldrig skriva direkt till databasen
 - Endast använda dokumenterade endpoints
 
-Backend körs på Render och är redan deployad.
+Backend körs på Render:
+`https://ql-hemsida.onrender.com`
+
+Supabase Project URL:
+`https://joynmufuivwwyhfnbeae.supabase.co`
 
 ---
 
-## 3. Autentisering (obligatoriskt)
+## 3. Autentisering (gäller Dashboard-appen)
 
 ### Inloggning
-
 Frontend använder Supabase Auth:
-
 - Email + lösenord
 
 Efter login:
-
 - Hämta `access_token`
-- Spara token i minne eller secure storage
-- Skicka alltid:
-
-Authorization: Bearer <JWT>
-
+- Spara token i `sessionStorage` (MVP)
+- Skicka alltid: `Authorization: Bearer <JWT>`
 
 ### Roller
-
-Frontend får aldrig gissa roll.  
+Frontend får aldrig gissa roll.
 Backend avgör access via RLS.
 
 Profiler:
+- `admin`
+- `seller`
 
-- admin
-- seller
-- user
+### Redirect-logik
+- Vid `401/403`: redirect till `/login`
+- Efter login: läs roll från Supabase Auth och redirect till rätt dashboard
 
 ---
 
-## 4. Vy 1: Publik kundvy (ingen inloggning)
+## 4. DEL 1: Bokningskomponent (Eleventy-site)
+
+### Beskrivning
+En isolerad komponent som byggs in i befintlig Eleventy-sida.
+Ska **inte** bryta befintlig CSS eller layout.
+Ska använda befintliga CSS-klasser där möjligt.
 
 ### Funktioner
-
-- Visa lediga tider
-- Boka tid
+- Visa lediga tider som en lista eller kalender-vy
+- Bokningsformulär med alla obligatoriska fält
+- Kampanjkod-fält (valfritt)
+- Tydlig bekräftelse eller felmeddelande efter bokning
 
 ### API
 
-#### Hämta tider
-
+#### Hämta lediga tider
+```
 GET /api/times
-
-
+```
 Svar:
-
 ```json
 [
   { "id": "uuid", "start_time": "2025-11-22T09:00:00Z" }
 ]
-Boka tid
-POST /api/book
-Body:
+```
 
+#### Boka tid
+```
+POST /api/book
+```
+Body:
+```json
 {
   "time_id": "uuid",
   "name": "Förnamn Efternamn",
@@ -100,10 +118,10 @@ Body:
   "phone": "Telefon",
   "email": "E-post",
   "service": "mattvätt",
-  "promo_code": "TEST50" 
+  "promo_code": "TEST50"
 }
-
-Svar (exempel):
+```
+Svar:
 ```json
 {
   "success": true,
@@ -116,187 +134,265 @@ Svar (exempel):
 }
 ```
 
-⚠️ Viktigt
-Bokning är race-safe
-
-Om tiden är upptagen returneras fel
-
-Frontend måste visa tydligt felmeddelande
-
-🛑 PRISREGEL
+### 🛑 PRISREGEL
 Backend är **enda sanningen** för pris.
 Frontend får **aldrig** räkna ut priset själv.
 Frontend får **aldrig** validera kampanjkoder lokalt.
-Frontend visar endast svaret från backend.
-Om ogiltig kod: Bokning genomförs till ordinarie pris, `promo_code_valid: false`.
+Frontend visar **endast** svaret från backend.
+Om ogiltig kod: bokning genomförs till ordinarie pris, `promo_code_valid: false`.
 
-### Verifierat backend-beteende (kampanjkoder)
+### UX-krav för bokningskomponenten
+- Loading-state medan tider hämtas
+- Loading-state under bokning (knapp inaktiveras)
+- Tydligt felmeddelande om tid är upptagen
+- Tydlig bekräftelse med pris och eventuell rabatt efter lyckad bokning
+- Formulär återställs efter lyckad bokning
 
-Följande beteende är implementerat och manuellt verifierat:
+---
 
-- Kampanjkod valideras endast i backend.
-- Kampanjkod kräver ingen inloggning.
-- Kampanjkod kräver ingen seller-koppling i v1.
-- Ogiltig eller förbrukad kod:
-  - bokning skapas ändå
-  - pris sätts till ordinarie
-  - frontend ska visa backendens svar utan egen logik
-- usage_limit hanteras race-safe i backend.
+## 5. DEL 2: Säljar-dashboard (separat domän)
 
-Frontend ska inte försöka tolka eller återskapa denna logik.
+### Beskrivning
+Mobiloptimerad vy för säljare.
+Säljare får **endast** se sina egna tilldelade bokningar.
+Säljare kan även göra bokningar åt kunder direkt vid dörren via ett inbyggt bokningsflöde.
 
+### Navigation
+Säljar-dashboarden har en meny med två huvudsektioner:
+1. **Mina bokningar** — lista över tilldelade bokningar
+2. **Boka åt kund** — bokningsformulär för att göra en bokning vid dörren
 
-5. Vy 2: Säljvy (inloggad)
-Säljare får:
+### Sidor
 
-Endast se egna bokningar
+#### `/login`
+- Email + lösenord via Supabase Auth
+- Efter login: redirect till `/`
 
-Aldrig se andra säljares bokningar
+#### `/` — Bokningsöversikt (huvudvy)
+Ett riktigt bokningssystem-utseende:
+- Lista/kalender med alla tilldelade bokningar
+- Varje bokning visar: kundnamn, adress, datum/tid, status (färgkodad)
+- Klickbar rad → går till detaljvy
+- Filtrerbar på status
 
-API
-Lista egna bokningar
+#### `/bookings/:id` — Detaljvy
+- All bokningsinformation
+- Statusuppdatering (dropdown/knappar)
+- Filuppladdning (kamera-first på mobil)
+- Lista över uppladdade filer
+
+#### `/book` — Boka åt kund (säljarens bokningsvy)
+Säljaren kan stå vid kundens dörr och göra en bokning direkt i sin dashboard.
+
+Formulär innehåller exakt samma fält som den publika bokningskomponenten:
+- Välj ledig tid (hämtas från `GET /api/times`)
+- Kundens namn
+- Kundens adress
+- Kundens telefon
+- Kundens e-post
+- Tjänst (mattvätt / möbeltvätt / madrasstvätt)
+- Kampanjkod (valfritt)
+
+⚠️ **Viktigt:** Säljaren skickar bokningen via samma publika endpoint som kunden (`POST /api/book`).
+Ingen autentisering krävs för själva bokningen — det är samma API som kundflödet.
+Fältet `seller_name` skickas automatiskt med säljarens namn från den inloggade sessionen.
+
+Efter lyckad bokning:
+- Visa bekräftelse med pris, eventuell rabatt och boknings-ID
+- Erbjud knapp för att göra en ny bokning
+
+### 💡 Kampanjkod för gratis bokning
+Säljaren kan använda en kampanjkod med `discount_percent: 100` för att boka helt gratis åt en kund.
+Ingen ny backend-logik krävs — admin skapar koden i admin-dashboarden.
+Koden fungerar precis som alla andra kampanjkoder.
+
+### API
+
+#### Lista egna bokningar
+```
 GET /api/seller/my-bookings
-Bokningsdetalj
+Authorization: Bearer <JWT>
+```
+
+#### Bokningsdetalj
+```
 GET /api/seller/bookings/:id
-Svar inkluderar:
+Authorization: Bearer <JWT>
+```
+Svar inkluderar bokningsdata + filer.
 
-Bokningsdata
-
-Filer
-
-(framtida AI-data)
-
-Uppdatera status
+#### Uppdatera status
+```
 PATCH /api/seller/bookings/:id/status
-Body:
+Authorization: Bearer <JWT>
+```
+Body: `{ "status": "visited" }`
 
-{ "status": "visited" }
 Tillåtna statusar:
+- `assigned`
+- `visited`
+- `won`
+- `lost`
+- `no_show`
 
-assigned
-
-visited
-
-won
-
-lost
-
-no_show
-
-Filuppladdning
+#### Ladda upp fil
+```
 POST /api/seller/bookings/:id/files
+Authorization: Bearer <JWT>
+Content-Type: multipart/form-data
+```
 Form-data:
+- `file` → jpg/png/webp/pdf (max 10MB)
+- `file_type` → `offer` | `before` | `after` | `other`
 
-file → jpg/png/pdf
-
-file_type → offer | before | after | other
-
-Frontend ska:
-
-Använda mobilkamera när möjligt
-
-Visa uppladdade filer direkt
-
-Visa tydlig feedback
-
-6. Vy 3: Adminvy (inloggad)
-Admin får:
-
-Se alla bokningar
-
-Tilldela säljare
-
-Ändra status och betalning
-
-Se alla filer
-
-API
-Lista bokningar
-GET /api/admin/bookings
-Lista säljare
-GET /api/admin/sellers
-Kampanjkoder
-GET /api/admin/promo-codes
-POST /api/admin/promo-codes
-PATCH /api/admin/promo-codes/:id
-Tilldela säljare
-PATCH /api/admin/bookings/:id/assign
-Body:
-
-{ "seller_user_id": "uuid" }
-➡️ Sätter automatiskt status till assigned
-
-Uppdatera status / betalning
-PATCH /api/admin/bookings/:id
-Exempel:
-
+#### Boka åt kund (säljarens bokningsflöde)
+```
+GET /api/times                          (hämta lediga tider, ingen auth)
+POST /api/book                          (skicka bokning, ingen auth)
+```
+Body för `POST /api/book`:
+```json
 {
-  "status": "won",
-  "payment_status": "paid_on_site"
+  "time_id": "uuid",
+  "name": "Kundens namn",
+  "address": "Kundens adress",
+  "phone": "Kundens telefon",
+  "email": "Kundens e-post",
+  "service": "mattvätt",
+  "seller_name": "Säljarens namn (hämtas automatiskt från inloggad session)",
+  "promo_code": "GRATIS100"
 }
-Filuppladdning:
+```
 
-Admin använder samma endpoint som säljare men har alltid access.
+### UX-krav säljar-dashboard
+- Mobil-first design
+- Tydlig meny med "Mina bokningar" och "Boka åt kund"
+- Kamera-first för filuppladdning på mobil
+- Färgkodade statusar (t.ex. grön = won, röd = lost, gul = assigned)
+- Loading-states på alla anrop
+- Tydliga felmeddelanden
+- Bokningsformuläret ska vara snabbt och enkelt att fylla i på mobil
 
-7. Filhantering
-Alla filer lagras i Supabase Storage
+---
 
-Bucket: booking-files
+## 6. DEL 3: Admin-dashboard (separat domän, samma app)
 
-Bucket är private
+### Beskrivning
+Desktop-optimerad vy för admin.
+Admin ser allt och kan göra allt utom att skapa bokningar.
 
-Metadata sparas i booking_files
+### Sidor
 
-Frontend:
+#### `/admin/login`
+- Email + lösenord via Supabase Auth
+- Efter login: redirect till `/admin`
 
-Får endast använda backend-URL:er
+#### `/admin` — Bokningsöversikt
+- Tabell med alla bokningar
+- Filtrerbar på status, säljare, datum
+- Sökbar på kundnamn/email
+- Klickbar rad → detaljvy
 
-Får aldrig bygga public URLs själv
+#### `/admin/bookings/:id` — Detaljvy
+- All bokningsinformation inklusive pris och kampanjkod
+- Tilldela säljare (dropdown med alla säljare)
+- Ändra status
+- Ändra betalningsstatus
+- Se och ladda upp filer
 
-8. UX-krav
-Ingen sida får krascha vid 401/403
+#### `/admin/sellers` — Säljarlista
+- Lista alla säljare (från `/api/admin/sellers`)
+- Visar email och roll
 
-Tydliga felmeddelanden
+#### `/admin/times` — Tidhantering
+- Lista alla tider (bokade och lediga)
+- Lägg till ny tid
+- Ta bort oledad tid
 
-Loading-states på alla API-anrop
+#### `/admin/promo-codes` — Kampanjkoder
+- Lista alla kampanjkoder med status och användning
+- Skapa ny kampanjkod
+- Aktivera/inaktivera kod
+- Redigera befintlig kod
 
-Mobil-först för säljvy
+### API
 
-Desktop-optimerad adminvy
+#### Bokningar
+```
+GET  /api/admin/bookings
+GET  /api/admin/bookings/:id
+PATCH /api/admin/bookings/:id/assign    body: { seller_user_id, seller_name }
+PATCH /api/admin/bookings/:id          body: { status, payment_status }
+```
 
-9. Absoluta förbud
+#### Säljare
+```
+GET /api/admin/sellers
+```
+
+#### Tider
+```
+GET    /api/admin/times
+POST   /api/admin/times      body: { start_time }
+DELETE /api/admin/times/:id
+```
+
+#### Kampanjkoder
+```
+GET   /api/admin/promo-codes
+POST  /api/admin/promo-codes   body: { code, discount_percent, active, usage_limit }
+PATCH /api/admin/promo-codes/:id
+```
+
+#### Filuppladdning (admin)
+```
+POST /api/admin/bookings/:id/files
+Authorization: Bearer <JWT>
+Content-Type: multipart/form-data
+```
+
+### UX-krav admin-dashboard
+- Desktop-optimerad (men responsiv)
+- Tabeller med sortering och filtrering
+- Bekräftelsedialoger vid destruktiva åtgärder (t.ex. ta bort tid)
+- Loading-states på alla anrop
+- Tydliga felmeddelanden
+
+---
+
+## 7. Filhantering
+
+- Alla filer lagras i Supabase Storage, bucket: `booking-files`
+- Bucket är private
+- Metadata sparas i `booking_files`
+- Frontend får **endast** använda URL:er som returneras från backend
+- Frontend får **aldrig** bygga public URLs själv
+
+---
+
+## 8. Absoluta förbud
+
 AI får INTE:
+- Skapa nya endpoints
+- Ändra backend-logik
+- Hoppa över auth på skyddade routes
+- Visa data utan API-svar
+- Lagra JWT osäkert (ej localStorage)
+- Gissa roller
+- Blanda ihop Eleventy-komponenten med dashboard-appen
 
-Skapa nya endpoints
+---
 
-Ändra backend-logik
+## 9. Framtida (implementera ej nu)
+- AI-analys av offerter
+- Kundportal
+- Betalningsintegration
+- CORS-begränsning till specifik domän (sätts när domän är känd)
 
-Hoppa över auth
+---
 
-Visa data utan API-svar
+## 10. Slutregel
 
-Lagra JWT osäkert
-
-Gissa roller
-
-10. Framtida (implementera ej nu)
-AI-analys av offerter
-
-Kundportal
-
-Betalningsintegration
-
-11. Slutregel
-Om något är oklart:
-
-Stoppa och fråga istället för att anta.
-
+Om något är oklart: stoppa och fråga istället för att anta.
 Backend är korrekt byggd.
-
-Frontendens enda uppgift är att:
-
-koppla rätt
-
-visa rätt
-
-aldrig bryta säkerheten
+Frontendens enda uppgift är att koppla rätt, visa rätt, aldrig bryta säkerheten.

@@ -24,11 +24,11 @@ router.get("/times", async (req, res) => {
 
 // -----------------------------------------------------------
 // PUBLIC: Boka tid
-// body: { time_id, name, address, phone, email }
+// body: { time_id, name, address, phone, email, message, service }
 // -----------------------------------------------------------
 router.post("/book", async (req, res) => {
     // 1. Extract fields
-    const { time_id, name, address, phone, email, seller_name, service, promo_code } = req.body;
+    const { time_id, name, address, phone, email, seller_name, service, message } = req.body;
 
     if (!time_id || !name || !address || !phone || !email) {
         return res
@@ -36,42 +36,12 @@ router.post("/book", async (req, res) => {
             .json({ error: "time_id, name, address, phone, och email krävs" });
     }
 
-    // 2. Prepare Pricing & Promo Logic (Server-side Source of Truth)
-    const basePrice = getBasePrice(service); // Default 1500 if service missing
-    let finalPrice = basePrice;
-    let discountPercent = 0;
+    // 2. Prepare Pricing (Server-side Source of Truth)
+    const basePrice = getBasePrice(service);
+    const finalPrice = basePrice;
+    const discountPercent = 0;
 
-    let promoData = {
-        code: null,
-        id: null,
-        valid: false,
-        reason: null
-    };
-
-    // 3. Validate Promo Code (if provided)
-    if (promo_code) {
-        // NOTE: For v1 Global Codes, we pass null as sellerUserId.
-        // If we strictly needed seller validation, we'd need to fetch the seller for this booking context,
-        // but spec says "Kundflödet ska kunna skicka promo_code utan seller_user_id".
-        const validation = await validatePromoCode(promo_code, null);
-
-        if (validation.valid) {
-            promoData.valid = true;
-            promoData.code = validation.code;
-            promoData.id = validation.id;
-            discountPercent = validation.discount_percent;
-
-            const priceCalc = calculatePrice(basePrice, discountPercent);
-            finalPrice = priceCalc.finalPrice;
-        } else {
-            promoData.valid = false;
-            promoData.reason = validation.reason;
-            // Invalid code -> Full price
-            promoData.code = promo_code; // Store the attempted code (raw or normalized? Spec says normalized in DB)
-        }
-    }
-
-    // 4. Book Time Slot (Race-safe reservation via RPC)
+    // 3. Book Time Slot (Race-safe reservation via RPC)
     const { data: result, error: rpcError } = await supabase.rpc("book_time_slot", {
         p_time_id: time_id,
         p_name: name,
@@ -93,41 +63,22 @@ router.post("/book", async (req, res) => {
     const bookingId = result.booking_id;
     const startTime = result.start_time;
 
-    // 5. Apply Promo Usage & Finalize Price (Post-Booking Update)
-    let usageSuccess = true;
-    if (promoData.valid && promoData.id) {
-        // Try increment usage
-        const usageResult = await incrementUsage(promoData.id);
-        if (!usageResult.success) {
-            // Revert discount if limit reached (Race condition catch)
-            usageSuccess = false;
-            promoData.valid = false;
-            promoData.reason = "usage_limit_reached_at_checkout";
-            finalPrice = basePrice;
-            discountPercent = 0;
-            console.warn(`Promo usage limit hit for ${promoData.code} during booking ${bookingId}`);
-        }
-    }
-
-    // 6. Update Booking with Price & Promo Info
+    // 4. Update Booking with Price & Message
     const { error: updateError } = await supabase
         .from("bookings")
         .update({
             base_price_sek: basePrice,
             discount_percent: discountPercent,
             final_price_sek: finalPrice,
-            promo_code: promoData.code ? promoData.code.toUpperCase() : null, // Normalize stored code
-            promo_code_id: (promoData.valid && usageSuccess) ? promoData.id : null // Only link ID if actually used validly
+            message: message || null
         })
         .eq("id", bookingId);
 
     if (updateError) {
-        console.error("Failed to update booking price:", updateError);
-        // We don't fail the booking, but we log critical error. 
-        // Admin might need to fix manually.
+        console.error("Failed to update booking metadata:", updateError);
     }
 
-    // 7. Webhook & Response
+    // 5. Webhook & Response
     const webhookUrl = process.env.APPS_SCRIPT_WEBHOOK_URL;
     if (webhookUrl) {
         fetch(webhookUrl, {
@@ -140,11 +91,10 @@ router.post("/book", async (req, res) => {
                 address,
                 phone,
                 email,
+                message: message || "",
                 start_time: startTime,
                 seller_name: seller_name || null,
-                // Add price info to webhook
                 service: service || "mattvätt",
-                promo_code: promoData.code,
                 final_price: finalPrice
             })
         }).catch(err => console.error("Webhook fail:", err));
@@ -154,12 +104,8 @@ router.post("/book", async (req, res) => {
         success: true,
         message: "Bokning klar",
         booking_id: bookingId,
-        // Return pricing info
         base_price_sek: basePrice,
-        discount_percent: discountPercent,
-        final_price_sek: finalPrice,
-        promo_code_valid: promoData.valid,
-        promo_code_reason: promoData.reason
+        final_price_sek: finalPrice
     });
 });
 

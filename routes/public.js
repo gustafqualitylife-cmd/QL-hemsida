@@ -163,4 +163,38 @@ router.post("/book", async (req, res) => {
     });
 });
 
+// -----------------------------------------------------------
+// PUBLIC: Validera kampanjkod (utan bokning)
+// -----------------------------------------------------------
+router.post("/validate-promo", async (req, res) => {
+    try {
+        const raw = req.body?.promo_code;
+        const code = (raw || "").trim().toUpperCase();
+
+        if (!code) return res.json({ valid: false });
+
+        const { data, error } = await supabase
+            .from("promo_codes")
+            .select("code, discount_percent, active, starts_at, ends_at")
+            .eq("code", code)
+            .single();
+
+        if (error || !data) return res.json({ valid: false, reason: "not_found" });
+        if (data.active !== true) return res.json({ valid: false, reason: "inactive" });
+
+        const now = new Date();
+        if (data.starts_at && new Date(data.starts_at) > now) return res.json({ valid: false, reason: "not_started" });
+        if (data.ends_at && new Date(data.ends_at) < now) return res.json({ valid: false, reason: "expired" });
+
+        return res.json({
+            valid: true,
+            code: data.code,
+            discount_percent: data.discount_percent ?? 0
+        });
+    } catch (err) {
+        console.error("validate-promo error:", err);
+        return res.status(500).json({ valid: false, error: "Internt serverfel" });
+    }
+});
+
 export default router;
